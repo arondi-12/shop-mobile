@@ -1,9 +1,9 @@
 import 'react-native-url-polyfill/auto'
-import { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, Alert, FlatList, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, View } from 'react-native'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ActivityIndicator, Alert, FlatList, Image, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, View } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { createClient } from '@supabase/supabase-js'
-import Svg, { Path } from 'react-native-svg'
+import Svg, { Circle, Path } from 'react-native-svg'
 import * as WebBrowser from 'expo-web-browser'
 import * as ExpoLinking from 'expo-linking'
 
@@ -16,6 +16,41 @@ const supabase = createClient(process.env.EXPO_PUBLIC_SUPABASE_URL, process.env.
 // Alert.alert does nothing in the browser preview, so fall back to window.alert there.
 const notify = (title, msg) => (Platform.OS === 'web' ? window.alert(title + '\n' + msg) : Alert.alert(title, msg))
 const money = (c) => 'KES ' + (c / 100).toLocaleString()
+
+// Same palette as the website: navy + coral, light by default, dark on request.
+const LIGHT = { ink: '#16213a', brand: '#1f3a5f', accent: '#ff6b4a', bg: '#f6f7fb', card: '#ffffff', line: '#e1e5ee', muted: '#5b6578' }
+const DARK = { ink: '#eef1f7', brand: '#3b5f94', accent: '#ff6b4a', bg: '#0f1523', card: '#18202f', line: '#2a3447', muted: '#9aa7bd' }
+let s = makeStyles(LIGHT) // re-assigned by <App> whenever the theme changes
+
+function Icon({ name, size = 20, color = '#000' }) {
+  const p = { stroke: color, strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' }
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      {name === 'cart' && <><Circle cx="9" cy="20" r="1.5" {...p} /><Circle cx="18" cy="20" r="1.5" {...p} /><Path d="M2 3h3l2.6 12.4a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 2-1.6L21.5 8H6" {...p} /></>}
+      {name === 'search' && <><Circle cx="11" cy="11" r="7" {...p} /><Path d="M21 21l-4.3-4.3" {...p} /></>}
+      {name === 'sun' && <><Circle cx="12" cy="12" r="4" {...p} /><Path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" {...p} /></>}
+      {name === 'moon' && <Path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" {...p} />}
+    </Svg>
+  )
+}
+
+function ProductCard({ p, qty, onQty }) {
+  return (
+    <View style={s.pcard}>
+      <View style={s.pimg}>
+        {p.image_url ? <Image source={{ uri: p.image_url }} style={s.pimgPic} resizeMode="cover" /> : <Text style={s.pEmoji}>{p.emoji || '🛒'}</Text>}
+        <View style={s.ptag}><Text style={s.ptagText}>{p.category}</Text></View>
+      </View>
+      <View style={s.pbody}>
+        <Text style={s.pname} numberOfLines={1}>{p.name}</Text>
+        <Text style={s.pdesc} numberOfLines={2}>{p.description}</Text>
+        <Text style={s.pprice}>{money(p.price_cents)}</Text>
+        {qty ? <Stepper qty={qty} onChange={onQty} />
+          : <Pressable style={s.pAdd} onPress={() => onQty(1)}><Icon name="cart" size={16} color="#fff" /><Text style={s.btnText}>Add</Text></Pressable>}
+      </View>
+    </View>
+  )
+}
 
 function GoogleLogo() {
   return (
@@ -153,7 +188,7 @@ function AccountScreen({ email }) {
       <Text style={s.label}>Set or change your password</Text>
       <TextInput style={s.input} secureTextEntry placeholder="New password" value={pw} onChangeText={setPw} />
       <Pressable style={[s.btn, busy && { opacity: 0.6 }]} disabled={busy} onPress={save}><Text style={s.btnText}>{busy ? 'Saving…' : 'Save password'}</Text></Pressable>
-      <Pressable style={[s.btn, s.btnOutline]} onPress={() => supabase.auth.signOut()}><Text style={[s.btnText, { color: '#1f6f54' }]}>Sign out</Text></Pressable>
+      <Pressable style={[s.btn, s.btnOutline]} onPress={() => supabase.auth.signOut()}><Text style={[s.btnText, s.outlineText]}>Sign out</Text></Pressable>
     </ScrollView>
   )
 }
@@ -248,6 +283,13 @@ export default function App() {
   const [tab, setTab] = useState('shop')
   const [orderId, setOrderId] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
+  const [dark, setDark] = useState(false)
+  const [q, setQ] = useState('')
+  const [cat, setCat] = useState('All')
+  const c = dark ? DARK : LIGHT
+  s = useMemo(() => makeStyles(c), [dark])
+  useEffect(() => { AsyncStorage.getItem('theme').then((v) => setDark(v === 'dark')) }, [])
+  const flip = () => { AsyncStorage.setItem('theme', dark ? 'light' : 'dark'); setDark(!dark) }
   const [products, setProducts] = useState([])
   const [cart, setCart] = useState({}) // productId -> { p, qty }
   const uid = session?.user?.id
@@ -283,39 +325,64 @@ export default function App() {
     if (error) { notify('Could not update cart', error.message); loadCart() }
   }
 
-  if (session === undefined) return <View style={[s.screen, s.center]}><ActivityIndicator size="large" color="#1f6f54" /></View>
+  if (session === undefined) return <View style={[s.screen, s.center]}><ActivityIndicator size="large" color={c.brand} /></View>
   const items = Object.values(cart)
   const total = items.reduce((sum, i) => sum + i.p.price_cents * i.qty, 0)
   const count = items.reduce((sum, i) => sum + i.qty, 0)
+  const cats = ['All', ...new Set(products.map((p) => p.category))]
+  const shown = products.filter((p) => (cat === 'All' || p.category === cat) && p.name.toLowerCase().includes(q.toLowerCase()))
+  const grid = shown.length % 2 ? [...shown, { id: '_pad', pad: true }] : shown
 
   return (
     <View style={s.screen}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} />
+      <View style={s.strip}><Text style={s.stripText}>Fresh groceries · Pay on delivery</Text></View>
       {!session ? <Auth /> : (
         <>
           <View style={s.header}>
-            <View><Text style={s.brand}>Corner Shop</Text><Text style={s.muted}>{session.user.email}</Text></View>
-            <Pressable onPress={() => supabase.auth.signOut()}><Text style={s.link}>Sign out</Text></Pressable>
+            <View style={s.logoRow}><View style={s.mark}><Icon name="cart" size={18} color="#fff" /></View><Text style={s.brand}>Corner Shop</Text></View>
+            <View style={s.hActs}>
+              <Pressable style={s.iconBtn} onPress={flip} accessibilityLabel="Switch theme"><Icon name={dark ? 'sun' : 'moon'} color={c.ink} /></Pressable>
+              <Pressable style={s.cartBtn} onPress={() => setTab('cart')}>
+                <Icon name="cart" size={18} color="#fff" /><View style={s.cnt}><Text style={s.cntText}>{count}</Text></View><Text style={s.amt}>{money(total)}</Text>
+              </Pressable>
+            </View>
           </View>
-          <View style={{ height: 52 }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabs}>
+          <View style={s.navbar}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {[['shop', 'Shop'], ['cart', `Cart (${count})`], ['orders', 'Orders'], ['account', 'Account'], ...(isAdmin ? [['admin', 'Admin']] : [])].map(([k, l]) => (
-                <Pressable key={k} style={[s.tab, tab === k && s.tabOn]} onPress={() => setTab(k)}>
-                  <Text style={[s.tabText, tab === k && { color: '#fff' }]}>{l}</Text>
+                <Pressable key={k} style={[s.navItem, tab === k && s.navOn]} onPress={() => setTab(k)}>
+                  <Text style={[s.navText, tab === k && { color: '#fff' }]}>{l}</Text>
                 </Pressable>
               ))}
             </ScrollView>
           </View>
           {tab === 'shop' ? (
-            <FlatList data={products} keyExtractor={(p) => p.id} contentContainerStyle={{ padding: 16, gap: 12 }}
-              renderItem={({ item: p }) => (
-                <View style={s.card}>
-                  <Text style={s.emoji}>{p.emoji || '🛒'}</Text>
-                  <View style={{ flex: 1 }}><Text style={s.name}>{p.name}</Text><Text style={s.price}>{money(p.price_cents)}</Text></View>
-                  {cart[p.id] ? <Stepper qty={cart[p.id].qty} onChange={(q) => setQty(p, q)} />
-                    : <Pressable style={s.addBtn} onPress={() => setQty(p, 1)}><Text style={s.btnText}>Add</Text></Pressable>}
+            <FlatList data={grid} keyExtractor={(p) => p.id} numColumns={2} columnWrapperStyle={s.gridRow} keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ padding: 16, gap: 12 }}
+              ListHeaderComponent={(
+                <View>
+                  <View style={s.banner}>
+                    <Text style={s.eyebrow}>LOCAL · FRESH · FAST</Text>
+                    <Text style={s.bannerTitle}>Fresh groceries, delivered from the shop down the road.</Text>
+                    <Text style={s.bannerSub}>Order online and pay when it arrives.</Text>
+                    <View style={s.bannerEmoji}>{['🍅', '🥛', '🍞', '🍌', '🥬'].map((e) => <View key={e} style={s.bannerChip}><Text style={{ fontSize: 22 }}>{e}</Text></View>)}</View>
+                  </View>
+                  <View style={s.searchBox}>
+                    <Icon name="search" size={18} color={c.muted} />
+                    <TextInput style={s.searchInput} placeholder="Search products…" placeholderTextColor={c.muted} value={q} onChangeText={setQ} />
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipsRow}>
+                    {cats.map((k) => (
+                      <Pressable key={k} style={[s.chip, cat === k && s.chipOn]} onPress={() => setCat(k)}>
+                        <Text style={[s.chipText, cat === k && { color: '#fff' }]}>{k}</Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
                 </View>
-              )} />
+              )}
+              ListEmptyComponent={<Text style={s.muted}>No products match your search.</Text>}
+              renderItem={({ item: p }) => p.pad ? <View style={{ flex: 1 }} /> : <ProductCard p={p} qty={cart[p.id]?.qty || 0} onQty={(n) => setQty(p, n)} />} />
           ) : tab === 'checkout' ? (
             <Checkout uid={uid} items={items} total={total} onBack={() => setTab('cart')} onDone={(id) => { setCart({}); setOrderId(id); setTab('done') }} />
           ) : tab === 'done' ? (
@@ -335,7 +402,7 @@ export default function App() {
               ListEmptyComponent={<Text style={s.muted}>Your cart is empty. Add something from the shop.</Text>}
               renderItem={({ item: i }) => (
                 <View style={s.card}>
-                  <Text style={s.emoji}>{i.p.emoji || '🛒'}</Text>
+                  {i.p.image_url ? <Image source={{ uri: i.p.image_url }} style={s.thumb} /> : <Text style={s.emoji}>{i.p.emoji || '🛒'}</Text>}
                   <View style={{ flex: 1 }}><Text style={s.name}>{i.p.name}</Text><Text style={s.price}>{money(i.p.price_cents * i.qty)}</Text></View>
                   <Stepper qty={i.qty} onChange={(q) => setQty(i.p, q)} />
                 </View>
@@ -355,43 +422,80 @@ export default function App() {
   )
 }
 
-const G = '#1f6f54'
-const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#f7f8f5', paddingTop: StatusBar.currentHeight || 44 },
-  center: { alignItems: 'center', justifyContent: 'center' },
-  authBox: { flex: 1, justifyContent: 'center', padding: 24, gap: 12 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8 },
-  brand: { fontSize: 26, fontWeight: '800', color: G },
-  muted: { color: '#5d6b66' },
-  link: { color: G, fontWeight: '600', textDecorationLine: 'underline' },
-  input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#dde2db', borderRadius: 10, padding: 12, fontSize: 16 },
-  btn: { backgroundColor: G, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 4 },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginTop: 12 },
-  tab: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 99, borderWidth: 1, borderColor: '#dde2db', backgroundColor: '#fff' },
-  tabOn: { backgroundColor: G, borderColor: G },
-  tabText: { fontWeight: '600', color: '#1b2a2f' },
-  card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#dde2db', padding: 12 },
-  emoji: { fontSize: 34 },
-  name: { fontSize: 16, fontWeight: '700', color: '#1b2a2f' },
-  price: { color: '#5d6b66', marginTop: 2 },
-  addBtn: { backgroundColor: G, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 18 },
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  circle: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: '#dde2db', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
-  circleText: { fontSize: 20, lineHeight: 22 },
-  qty: { fontSize: 16, fontWeight: '700', minWidth: 18, textAlign: 'center' },
-  h1: { fontSize: 22, fontWeight: '800', color: '#1b2a2f' },
-  label: { fontWeight: '600', marginTop: 12, marginBottom: 4, color: '#1b2a2f' },
-  orderCard: { backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#dde2db', padding: 12, gap: 6 },
-  item: { color: '#1b2a2f' },
-  badge: { marginTop: 4, fontWeight: '700', color: G },
-  chip: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 99, borderWidth: 1, borderColor: '#dde2db', backgroundColor: '#fff' },
-  chipOn: { backgroundColor: G, borderColor: G },
-  chipText: { fontWeight: '600', color: '#1b2a2f' },
-  btnOutline: { backgroundColor: '#fff', borderWidth: 1, borderColor: G, marginTop: 12 },
-  orRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  line: { flex: 1, height: 1, backgroundColor: '#dde2db' },
-  gbtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#dadce0', borderRadius: 10, padding: 12 },
-  gtext: { color: '#3c4043', fontWeight: '600', fontSize: 16 },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 },
-})
+function makeStyles(c) {
+  return StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.bg, paddingTop: StatusBar.currentHeight || 44 },
+    center: { alignItems: 'center', justifyContent: 'center' },
+    authBox: { flex: 1, justifyContent: 'center', padding: 24, gap: 12 },
+    strip: { backgroundColor: c.ink, paddingVertical: 4, alignItems: 'center' },
+    stripText: { color: c.bg, fontSize: 11, letterSpacing: 0.5 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, backgroundColor: c.card, borderBottomWidth: 1, borderBottomColor: c.line },
+    logoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    mark: { width: 34, height: 34, borderRadius: 10, backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center' },
+    brand: { fontSize: 22, fontWeight: '800', color: c.brand },
+    hActs: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+    cartBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.brand, borderRadius: 99, paddingVertical: 7, paddingHorizontal: 12 },
+    cnt: { backgroundColor: c.accent, borderRadius: 99, minWidth: 20, height: 20, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
+    cntText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+    amt: { color: '#fff', fontWeight: '600', fontSize: 13 },
+    navbar: { backgroundColor: c.brand, height: 46 },
+    navItem: { paddingHorizontal: 16, justifyContent: 'center', height: 46 },
+    navOn: { borderBottomWidth: 3, borderBottomColor: c.accent },
+    navText: { color: '#ffffffb3', fontWeight: '600' },
+    muted: { color: c.muted },
+    link: { color: c.brand, fontWeight: '600', textDecorationLine: 'underline' },
+    input: { backgroundColor: c.card, borderWidth: 1, borderColor: c.line, borderRadius: 10, padding: 12, fontSize: 16, color: c.ink },
+    btn: { backgroundColor: c.brand, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 4 },
+    btnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+    btnOutline: { backgroundColor: c.card, borderWidth: 1, borderColor: c.brand, marginTop: 12 },
+    outlineText: { color: c.brand },
+    tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginTop: 12 },
+    tab: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 99, borderWidth: 1, borderColor: c.line, backgroundColor: c.card },
+    tabOn: { backgroundColor: c.brand, borderColor: c.brand },
+    tabText: { fontWeight: '600', color: c.ink },
+    banner: { backgroundColor: c.brand, padding: 22, alignItems: 'center', gap: 8, borderRadius: 18, marginBottom: 14 },
+    eyebrow: { color: '#ffd2c6', fontSize: 11, letterSpacing: 2, fontWeight: '700' },
+    bannerTitle: { color: '#fff', fontSize: 24, fontWeight: '800', textAlign: 'center' },
+    bannerSub: { color: '#ffffffdd', textAlign: 'center' },
+    bannerEmoji: { flexDirection: 'row', gap: 8, marginTop: 6 },
+    bannerChip: { width: 44, height: 44, borderRadius: 14, backgroundColor: '#ffffff22', alignItems: 'center', justifyContent: 'center' },
+    searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: c.card, borderWidth: 1, borderColor: c.line, borderRadius: 99, paddingHorizontal: 14, marginBottom: 10 },
+    searchInput: { flex: 1, paddingVertical: 10, fontSize: 16, color: c.ink },
+    chipsRow: { gap: 8, paddingBottom: 12 },
+    chip: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: 99, borderWidth: 1, borderColor: c.line, backgroundColor: c.card },
+    chipOn: { backgroundColor: c.brand, borderColor: c.brand },
+    chipText: { fontWeight: '600', color: c.ink },
+    gridRow: { gap: 12 },
+    pcard: { flex: 1, backgroundColor: c.card, borderRadius: 16, borderWidth: 1, borderColor: c.line, overflow: 'hidden' },
+    pimg: { aspectRatio: 1, width: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: c.bg },
+    pimgPic: { width: '100%', height: '100%' },
+    pEmoji: { fontSize: 54 },
+    ptag: { position: 'absolute', top: 8, left: 8, backgroundColor: c.card, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 99 },
+    ptagText: { fontSize: 11, fontWeight: '600', color: c.ink },
+    pbody: { padding: 10, alignItems: 'center', gap: 4, flex: 1 },
+    pname: { fontWeight: '700', fontSize: 15, color: c.ink, textAlign: 'center' },
+    pdesc: { color: c.muted, fontSize: 12, textAlign: 'center', minHeight: 32 },
+    pprice: { fontWeight: '800', fontSize: 15, color: c.ink, marginTop: 'auto' },
+    pAdd: { backgroundColor: c.brand, borderRadius: 99, paddingVertical: 8, alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+    card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: c.card, borderRadius: 14, borderWidth: 1, borderColor: c.line, padding: 12 },
+    thumb: { width: 44, height: 44, borderRadius: 10 },
+    emoji: { fontSize: 34 },
+    name: { fontSize: 16, fontWeight: '700', color: c.ink },
+    price: { color: c.muted, marginTop: 2 },
+    stepper: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    circle: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: c.line, alignItems: 'center', justifyContent: 'center', backgroundColor: c.card },
+    circleText: { fontSize: 20, lineHeight: 22, color: c.ink },
+    qty: { fontSize: 16, fontWeight: '700', minWidth: 18, textAlign: 'center', color: c.ink },
+    h1: { fontSize: 22, fontWeight: '800', color: c.ink },
+    label: { fontWeight: '600', marginTop: 12, marginBottom: 4, color: c.ink },
+    orRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    line: { flex: 1, height: 1, backgroundColor: c.line },
+    gbtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#dadce0', borderRadius: 10, padding: 12 },
+    gtext: { color: '#3c4043', fontWeight: '600', fontSize: 16 },
+    orderCard: { backgroundColor: c.card, borderRadius: 14, borderWidth: 1, borderColor: c.line, padding: 12, gap: 6 },
+    item: { color: c.ink },
+    badge: { marginTop: 4, fontWeight: '700', color: c.brand },
+    totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 },
+  })
+}

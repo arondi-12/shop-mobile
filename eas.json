@@ -1,0 +1,27 @@
+{
+  "cli": {
+    "version": ">= 24.11.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": { "buildType": "apk" },
+  "env": {
+    "EXPO_PUBLIC_SUPABASE_URL": "https://cyqdxgtfvhielsuurxdc.supabase.co",
+    "EXPO_PUBLIC_SUPABASE_KEY": "sb_publishable_tiByDr0B7dlhFKK9TxE9eg_WvFHPB-l",
+    "EXPO_PUBLIC_WEB_URL": "https://corner-shop-seven.vercel.app"
+  }
+    },
+    "production": {
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
